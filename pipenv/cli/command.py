@@ -284,7 +284,7 @@ def uninstall(ctx, state, all_dev=False, all=False, **kwargs):
     """Uninstalls a provided package and removes it from Pipfile."""
     from pipenv.routines.uninstall import do_uninstall
 
-    retcode = do_uninstall(
+    if retcode := do_uninstall(
         state.project,
         packages=state.installstate.packages,
         editable_packages=state.installstate.editables,
@@ -296,8 +296,7 @@ def uninstall(ctx, state, all_dev=False, all=False, **kwargs):
         pypi_mirror=state.pypi_mirror,
         categories=state.installstate.categories,
         ctx=ctx,
-    )
-    if retcode:
+    ):
         sys.exit(retcode)
 
 
@@ -641,7 +640,7 @@ def sync(ctx, state, bare=False, user=False, unused=False, **kwargs):
     """Installs all packages specified in Pipfile.lock."""
     from pipenv.routines.install import do_sync
 
-    retcode = do_sync(
+    if retcode := do_sync(
         state.project,
         dev=state.installstate.dev,
         python=state.python,
@@ -654,8 +653,7 @@ def sync(ctx, state, bare=False, user=False, unused=False, **kwargs):
         extra_pip_args=state.installstate.extra_pip_args,
         categories=state.installstate.categories,
         site_packages=state.site_packages,
-    )
-    if retcode:
+    ):
         ctx.abort()
 
 
@@ -699,7 +697,7 @@ def scripts(state):
     lines.extend(
         f"{name:<{first_column_width}}  {script}" for name, script in scripts.items()
     )
-    console.print("\n".join(line for line in lines))
+    console.print("\n".join(lines))
 
 
 @cli.command(

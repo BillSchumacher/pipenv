@@ -195,8 +195,7 @@ class Entry:
     @markers.setter
     def markers(self, markers):
         if not markers:
-            marker_str = self.marker_to_str(markers)
-            if marker_str:
+            if marker_str := self.marker_to_str(markers):
                 self.entry.merge_markers(marker_str)
                 self._markers = self.marker_to_str(self._entry.markers)
                 entry_dict = self.entry_dict.copy()
@@ -227,9 +226,7 @@ class Entry:
             marker_str = " and ".join([normalize_marker_str(m) for m in marker if m])
         elif isinstance(marker, str):
             marker_str = f"{normalize_marker_str(marker)}"
-        if isinstance(marker_str, str):
-            return marker_str
-        return None
+        return marker_str if isinstance(marker_str, str) else None
 
     @cached_property
     def get_cleaned_dict(self):
@@ -287,7 +284,7 @@ class Entry:
 
     @property
     def is_in_pipfile(self):
-        return True if self.pipfile_name else False
+        return bool(self.pipfile_name)
 
     @property
     def pipfile_packages(self):
@@ -628,9 +625,7 @@ def resolve_packages(
                 json.dump([], fh)
             else:
                 json.dump(results, fh)
-    if results:
-        return results
-    return []
+    return results if results else []
 
 
 def _main(

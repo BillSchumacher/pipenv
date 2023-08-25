@@ -225,10 +225,9 @@ class Asdf(Installer):
         A ValueError is raised if the given version does not have a match in
         asdf. A InstallerError is raised if the asdf command fails.
         """
-        c = self._run(
+        return self._run(
             "install",
             "python",
             str(version),
             timeout=self.project.s.PIPENV_INSTALL_TIMEOUT,
         )
-        return c

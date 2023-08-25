@@ -122,9 +122,7 @@ class _LockFileEncoder(json.JSONEncoder):
 
 
 def preferred_newlines(f):
-    if isinstance(f.newlines, str):
-        return f.newlines
-    return DEFAULT_NEWLINES
+    return f.newlines if isinstance(f.newlines, str) else DEFAULT_NEWLINES
 
 
 # (path, file contents) => TOMLFile
@@ -172,8 +170,9 @@ class Project:
                 pip_conf_indexes.append(
                     {
                         "url": value,
-                        "verify_ssl": not any(
-                            trusted_host in value for trusted_host in trusted_hosts
+                        "verify_ssl": all(
+                            trusted_host not in value
+                            for trusted_host in trusted_hosts
                         )
                         and "https://" in value,
                         "name": f"pip_conf_index_{key_parts[0]}",
@@ -215,10 +214,7 @@ class Project:
 
     def path_to(self, p: str) -> str:
         """Returns the absolute path to a given relative path."""
-        if os.path.isabs(p):
-            return p
-
-        return os.sep.join([self._original_dir, p])
+        return p if os.path.isabs(p) else os.sep.join([self._original_dir, p])
 
     def get_pipfile_section(self, section):
         """Returns the details from the section of the Project's Pipfile."""
@@ -266,7 +262,6 @@ class Project:
         pkg_url = f"https://pypi.org/pypi/{ireq.name}/json"
         session = self.get_requests_session_for_source(source)
         try:
-            collected_hashes = set()
             # Grab the hashes from the new warehouse API.
             r = session.get(pkg_url, timeout=10)
             api_releases = r.json()["releases"]
@@ -276,11 +271,12 @@ class Project:
                 cleaned_releases[api_version] = api_info
             version = ""
             if ireq.specifier:
-                spec = next(iter(s for s in ireq.specifier), None)
-                if spec:
+                if spec := next(iter(iter(ireq.specifier)), None):
                     version = spec.version
-            for release in cleaned_releases[version]:
-                collected_hashes.add(release["digests"][FAVORITE_HASH])
+            collected_hashes = {
+                release["digests"][FAVORITE_HASH]
+                for release in cleaned_releases[version]
+            }
             return self.prepend_hash_types(collected_hashes, FAVORITE_HASH)
         except (ValueError, KeyError, ConnectionError):
             if self.s.is_verbose():
@@ -305,8 +301,7 @@ class Project:
 
             version = ""
             if ireq.specifier:
-                spec = next(iter(s for s in ireq.specifier), None)
-                if spec:
+                if spec := next(iter(iter(ireq.specifier)), None):
                     version = spec.version
             for package_url in hrefs:
                 if version in parse.unquote(package_url):
@@ -376,10 +371,7 @@ class Project:
     @property
     def virtualenv_exists(self) -> bool:
         if os.path.exists(self.virtualenv_location):
-            if os.name == "nt":
-                extra = ["Scripts", "activate.bat"]
-            else:
-                extra = ["bin", "activate"]
+            extra = ["Scripts", "activate.bat"] if os.name == "nt" else ["bin", "activate"]
             return os.path.isfile(os.sep.join([self.virtualenv_location] + extra))
 
         return False
@@ -465,7 +457,7 @@ class Project:
             prefix = self.virtualenv_location
             python = None
         sources = self.sources if self.sources else [self.default_source]
-        environment = Environment(
+        return Environment(
             prefix=prefix,
             python=python,
             is_venv=is_venv,
@@ -473,7 +465,6 @@ class Project:
             pipfile=self.parsed_pipfile,
             project=self,
         )
-        return environment
 
     @property
     def environment(self) -> Environment:
@@ -499,7 +490,7 @@ class Project:
         #   https://www.gnu.org/software/bash/manual/html_node/Double-Quotes.html
         #   http://www.tldp.org/LDP/abs/html/special-chars.html#FIELDREF
         #   https://github.com/torvalds/linux/blob/2bfe01ef/include/uapi/linux/binfmts.h#L18
-        return re.sub(r'[ &$`!*@"()\[\]\\\r\n\t]', "_", name)[0:42]
+        return re.sub(r'[ &$`!*@"()\[\]\\\r\n\t]', "_", name)[:42]
 
     def _get_virtualenv_hash(self, name: str) -> str:
         """Get the name of the virtualenv adjusted for windows if needed
@@ -544,8 +535,7 @@ class Project:
 
     @property
     def virtualenv_name(self) -> str:
-        custom_name = self.s.PIPENV_CUSTOM_VENV_NAME
-        if custom_name:
+        if custom_name := self.s.PIPENV_CUSTOM_VENV_NAME:
             return custom_name
         sanitized, encoded_hash = self._get_virtualenv_hash(self.name)
         suffix = ""
@@ -557,7 +547,7 @@ class Project:
 
         # If the pipfile was located at '/home/user/MY_PROJECT/Pipfile',
         # the name of its virtualenv will be 'my-project-wyUfYPqE'
-        return sanitized + "-" + encoded_hash + suffix
+        return f"{sanitized}-{encoded_hash}{suffix}"
 
     @property
     def virtualenv_location(self) -> str:
@@ -762,8 +752,7 @@ class Project:
     def _pipfile(self):
         from pipenv.utils.pipfile import Pipfile as ReqLibPipfile
 
-        pf = ReqLibPipfile.load(self.pipfile_location)
-        return pf
+        return ReqLibPipfile.load(self.pipfile_location)
 
     @property
     def lockfile_location(self):
@@ -778,12 +767,11 @@ class Project:
         return self.load_lockfile()
 
     def get_editable_packages(self, category):
-        packages = {
+        return {
             k: v
             for k, v in self.parsed_pipfile.get(category, {}).items()
             if is_editable(v)
         }
-        return packages
 
     def _get_vcs_packages(self, dev=False):
         from pipenv.utils.requirementslib import is_vcs
@@ -801,7 +789,7 @@ class Project:
         """Returns a list of all packages."""
         packages = {}
         for category in self.get_package_categories():
-            packages.update(self.parsed_pipfile.get(category, {}))
+            packages |= self.parsed_pipfile.get(category, {})
         return packages
 
     @property
@@ -816,13 +804,7 @@ class Project:
 
     @property
     def pipfile_is_empty(self):
-        if not self.pipfile_exists:
-            return True
-
-        if not self.read_pipfile():
-            return True
-
-        return False
+        return True if not self.pipfile_exists else not self.read_pipfile()
 
     def create_pipfile(self, python=None):
         """Creates the Pipfile, filled with juicy defaults."""
@@ -874,12 +856,13 @@ class Project:
         from pipenv.utils.locking import Lockfile as Req_Lockfile
 
         if from_pipfile and self.pipfile_exists:
-            lockfile_dict = {}
             categories = self.get_package_categories(for_lockfile=True)
             _lockfile = self.lockfile(categories=categories)
-            for category in categories:
-                lockfile_dict[category] = _lockfile.get(category, {}).copy()
-            lockfile_dict.update({"_meta": self.get_lockfile_meta()})
+            lockfile_dict = {
+                category: _lockfile.get(category, {}).copy()
+                for category in categories
+            }
+            lockfile_dict["_meta"] = self.get_lockfile_meta()
             lockfile = Req_Lockfile.from_data(
                 path=self.lockfile_location, data=lockfile_dict, meta_from_project=False
             )
@@ -898,21 +881,20 @@ class Project:
             )
         if lockfile.lockfile is not None:
             return lockfile
-        if self.lockfile_exists and self.lockfile_content:
-            lockfile_dict = self.lockfile_content.copy()
-            sources = lockfile_dict.get("_meta", {}).get("sources", [])
-            if not sources:
-                sources = self.pipfile_sources(expand_vars=False)
-            elif not isinstance(sources, list):
-                sources = [sources]
-            lockfile_dict["_meta"]["sources"] = [self.populate_source(s) for s in sources]
-            _created_lockfile = Req_Lockfile.from_data(
-                path=self.lockfile_location, data=lockfile_dict, meta_from_project=False
-            )
-            lockfile.lockfile = lockfile.projectfile.model = _created_lockfile
-            return lockfile
-        else:
+        if not self.lockfile_exists or not self.lockfile_content:
             return self.get_or_create_lockfile(categories=categories, from_pipfile=True)
+        lockfile_dict = self.lockfile_content.copy()
+        sources = lockfile_dict.get("_meta", {}).get("sources", [])
+        if not sources:
+            sources = self.pipfile_sources(expand_vars=False)
+        elif not isinstance(sources, list):
+            sources = [sources]
+        lockfile_dict["_meta"]["sources"] = [self.populate_source(s) for s in sources]
+        _created_lockfile = Req_Lockfile.from_data(
+            path=self.lockfile_location, data=lockfile_dict, meta_from_project=False
+        )
+        lockfile.lockfile = lockfile.projectfile.model = _created_lockfile
+        return lockfile
 
     def get_lockfile_meta(self):
         from .vendor.plette.lockfiles import PIPFILE_SPEC_CURRENT
@@ -1002,14 +984,11 @@ class Project:
 
     @property
     def sources(self):
-        if self.lockfile_exists and hasattr(self.lockfile_content, "keys"):
-            meta_ = self.lockfile_content.get("_meta", {})
-            sources_ = meta_.get("sources")
-            if sources_:
-                return sources_
-
-        else:
+        if not self.lockfile_exists or not hasattr(self.lockfile_content, "keys"):
             return self.pipfile_sources()
+        meta_ = self.lockfile_content.get("_meta", {})
+        if sources_ := meta_.get("sources"):
+            return sources_
 
     @property
     def sources_default(self):
@@ -1073,16 +1052,16 @@ class Project:
         if section is None:
             section = {}
         package_name = pep423_name(package_name)
-        for name in section.keys():
-            if pep423_name(name) == package_name:
-                return name
-        return None
+        return next(
+            (name for name in section.keys() if pep423_name(name) == package_name),
+            None,
+        )
 
     def remove_package_from_pipfile(self, package_name, category):
-        # Read and append Pipfile.
-        name = self.get_package_name_in_pipfile(package_name, category=category)
-        p = self.parsed_pipfile
-        if name:
+        if name := self.get_package_name_in_pipfile(
+            package_name, category=category
+        ):
+            p = self.parsed_pipfile
             del p[category][name]
             self.write_toml(p)
             return True
@@ -1090,12 +1069,12 @@ class Project:
 
     def remove_packages_from_pipfile(self, packages):
         parsed = self.parsed_pipfile
-        packages = set([pep423_name(pkg) for pkg in packages])
+        packages = {pep423_name(pkg) for pkg in packages}
         for category in self.get_package_categories():
             pipfile_section = parsed.get(category, {})
-            pipfile_packages = set(
-                [pep423_name(pkg_name) for pkg_name in pipfile_section.keys()]
-            )
+            pipfile_packages = {
+                pep423_name(pkg_name) for pkg_name in pipfile_section.keys()
+            }
             to_remove = packages & pipfile_packages
             for pkg in to_remove:
                 pkg_name = self.get_package_name_in_pipfile(pkg, category=category)
@@ -1113,14 +1092,12 @@ class Project:
         name = self.get_package_name_in_pipfile(req_name, category=category)
         normalized_name = normalize_name(req_name)
 
-        extras = package.extras
-        specifier = "*"
-        if package.req and package.specifier:
-            specifier = str(package.specifier)
-
+        specifier = (
+            str(package.specifier) if package.req and package.specifier else "*"
+        )
         # Construct package requirement
         entry = {}
-        if extras:
+        if extras := package.extras:
             entry["extras"] = list(extras)
         if path_specifier:
             entry["file"] = unquote(path_specifier)
@@ -1135,10 +1112,7 @@ class Project:
                         entry["extras"] = sorted(
                             [extra.strip() for extra in extras_section.split(",")]
                         )
-                    if "@ " in pip_line:
-                        vcs_part = pip_line.split("@ ", 1)[1]
-                    else:
-                        vcs_part = pip_line
+                    vcs_part = pip_line.split("@ ", 1)[1] if "@ " in pip_line else pip_line
                     vcs_parts = vcs_part.rsplit("@", 1)
                     entry["ref"] = vcs_parts[1].split("#", 1)[0].strip()
                     entry[vcs] = vcs_parts[0].strip()
@@ -1165,8 +1139,6 @@ class Project:
         )
 
     def add_pipfile_entry_to_pipfile(self, name, normalized_name, entry, category=None):
-        newly_added = False
-
         # Read and append Pipfile.
         p = self.parsed_pipfile
 
@@ -1177,10 +1149,7 @@ class Project:
         if name and name != normalized_name:
             self.remove_package_from_pipfile(name, category=category)
 
-        # Add the package to the group.
-        if normalized_name not in p[category]:
-            newly_added = True
-
+        newly_added = normalized_name not in p[category]
         p[category][normalized_name] = entry
 
         # Write Pipfile.
@@ -1328,11 +1297,10 @@ class Project:
 
         scripts_dirname = "Scripts" if os.name == "nt" else "bin"
         scripts_dir = os.path.join(self.virtualenv_location, scripts_dirname)
-        finders = [
+        return [
             Finder(path=scripts_dir, global_search=gs, system=False)
             for gs in (False, True)
         ]
-        return finders
 
     @property
     def finder(self):
@@ -1343,9 +1311,8 @@ class Project:
         result = next(iter(filter(None, (find(finder) for finder in self.finders))), None)
         if not result:
             result = self._which(search)
-        else:
-            if as_path:
-                result = str(result.path)
+        elif as_path:
+            result = str(result.path)
         return result
 
     def python(self, system=False) -> str:
@@ -1363,16 +1330,16 @@ class Project:
         if not (location and os.path.exists(location)) and not allow_global:
             raise RuntimeError("location not created nor specified")
 
-        version_str = "python{}".format(".".join([str(v) for v in sys.version_info[:2]]))
+        version_str = f'python{".".join([str(v) for v in sys.version_info[:2]])}'
         is_python = command in ("python", os.path.basename(sys.executable), version_str)
         if not allow_global:
-            if os.name == "nt":
-                p = find_windows_executable(os.path.join(location, "Scripts"), command)
-            else:
-                p = os.path.join(location, "bin", command)
-        else:
-            if is_python:
-                p = sys.executable
+            p = (
+                find_windows_executable(os.path.join(location, "Scripts"), command)
+                if os.name == "nt"
+                else os.path.join(location, "bin", command)
+            )
+        elif is_python:
+            p = sys.executable
         if not os.path.exists(p):
             if is_python:
                 p = sys.executable or system_which("python")
