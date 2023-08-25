@@ -91,11 +91,14 @@ class Environment:
             self._modules[name] = importlib.import_module(name)
         module = self._modules[name]
         if not module:
-            dist = next(
-                iter(dist for dist in self.base_working_set if dist.project_name == name),
+            if dist := next(
+                iter(
+                    dist
+                    for dist in self.base_working_set
+                    if dist.project_name == name
+                ),
                 None,
-            )
-            if dist:
+            ):
                 dist.activate()
             module = importlib.import_module(name)
         return module
@@ -114,8 +117,7 @@ class Environment:
         :rtype: set(:class:`pkg_resources.Distribution`)
         """
 
-        deps = set()
-        deps.add(dist)
+        deps = {dist}
         try:
             reqs = dist.requires()
         # KeyError = limited metadata can be found
@@ -145,8 +147,7 @@ class Environment:
     def python_version(self) -> str:
         with self.activated():
             sysconfig = self.safe_import("sysconfig")
-            py_version = sysconfig.get_python_version()
-            return py_version
+            return sysconfig.get_python_version()
 
     def find_libdir(self) -> Path | None:
         libdir = self.prefix / "lib"
@@ -156,14 +157,13 @@ class Environment:
     def python_info(self) -> dict[str, str]:
         include_dir = self.prefix / "include"
         if not os.path.exists(include_dir):
-            include_dirs = self.get_include_path()
-            if include_dirs:
-                include_path = include_dirs.get(
+            if include_dirs := self.get_include_path():
+                if include_path := include_dirs.get(
                     "include", include_dirs.get("platinclude")
-                )
-                if not include_path:
+                ):
+                    include_dir = Path(include_path)
+                else:
                     return {}
-                include_dir = Path(include_path)
         python_path = next(iter(list(include_dir.iterdir())), None)
         if python_path and python_path.name.startswith("python"):
             python_version = python_path.name.replace("python", "")
@@ -261,10 +261,7 @@ class Environment:
             paths["prefix"] = prefix
         purelib = paths["purelib"] = make_posix(paths["purelib"])
         platlib = paths["platlib"] = make_posix(paths["platlib"])
-        if purelib == platlib:
-            lib_dirs = purelib
-        else:
-            lib_dirs = purelib + os.pathsep + platlib
+        lib_dirs = purelib if purelib == platlib else purelib + os.pathsep + platlib
         paths["libdir"] = purelib
         paths["PYTHONPATH"] = os.pathsep.join(["", ".", lib_dirs])
         paths["libdirs"] = lib_dirs
@@ -347,15 +344,15 @@ class Environment:
         )
         sysconfig_line = "sysconfig.get_path('{0}')"
         if python_lib:
-            for key in ("purelib", "platlib", "stdlib", "platstdlib"):
-                pylib_lines.append(
-                    f"u'{key}': u'{{0}}'.format({sysconfig_line.format(key)})"
-                )
+            pylib_lines.extend(
+                f"u'{key}': u'{{0}}'.format({sysconfig_line.format(key)})"
+                for key in ("purelib", "platlib", "stdlib", "platstdlib")
+            )
         if python_inc:
-            for key in ("include", "platinclude"):
-                pyinc_lines.append(
-                    f"u'{key}': u'{{0}}'.format({sysconfig_line.format(key)})"
-                )
+            pyinc_lines.extend(
+                f"u'{key}': u'{{0}}'.format({sysconfig_line.format(key)})"
+                for key in ("include", "platinclude")
+            )
         lines = pylib_lines + pyinc_lines
         if scripts:
             lines.append(
@@ -366,7 +363,7 @@ class Environment:
                 "u'py_version_short': u'{0}'.format(sysconfig.get_python_version()),"
             )
         lines_as_str = ",".join(lines)
-        py_command = py_command % lines_as_str
+        py_command %= lines_as_str
         return py_command
 
     def get_paths(self) -> dict[str, str] | None:
@@ -483,8 +480,7 @@ class Environment:
 
         command = [self.python, "-c", "import sys; print(sys.prefix)"]
         c = subprocess_run(command)
-        sys_prefix = Path(c.stdout.strip()).as_posix()
-        return sys_prefix
+        return Path(c.stdout.strip()).as_posix()
 
     @cached_property
     def paths(self) -> dict[str, str]:
@@ -524,7 +520,7 @@ class Environment:
             if not loc.exists():
                 continue
             for pth in loc.iterdir():
-                if not pth.suffix == ".egg-link":
+                if pth.suffix != ".egg-link":
                     continue
                 contents = [
                     normalize_path(line.strip()) for line in pth.read_text().splitlines()
@@ -583,12 +579,11 @@ class Environment:
     def get_installed_packages(self) -> list[pkg_resources.Distribution]:
         """Returns all of the installed packages in a given environment"""
         workingset = self.get_working_set()
-        packages = [
+        return [
             pkg
             for pkg in workingset
             if self.dist_is_in_project(pkg) and pkg.key != "python"
         ]
-        return packages
 
     @contextlib.contextmanager
     def get_finder(self, pre: bool = False) -> ContextManager[PackageFinder]:
@@ -602,10 +597,9 @@ class Environment:
         pip_options.cache_dir = self.project.s.PIPENV_CACHE_DIR
         pip_options.pre = self.pipfile.get("pre", pre)
         session = pip_command._build_session(pip_options)
-        finder = get_package_finder(
+        yield get_package_finder(
             install_cmd=pip_command, options=pip_options, session=session
         )
-        yield finder
 
     def get_package_info(
         self, pre: bool = False
@@ -744,8 +738,7 @@ class Environment:
         :rtype: :class:`pkg_resources.WorkingSet`
         """
 
-        working_set = pkg_resources.WorkingSet(self.sys_path)
-        return working_set
+        return pkg_resources.WorkingSet(self.sys_path)
 
     def is_installed(self, pkgname):
         """Given a package name, returns whether it is installed in the environment
@@ -783,11 +776,14 @@ class Environment:
                 )
                 vcs_type = direct_url_metadata.get("vcs_info", {}).get("vcs", "")
                 _, pipfile_part = as_pipfile(req).popitem()
-                vcs_ref = ""
-                for vcs in VCS_LIST:
-                    if pipfile_part.get(vcs):
-                        vcs_ref = pipfile_part[vcs].rsplit("@", 1)[-1]
-                        break
+                vcs_ref = next(
+                    (
+                        pipfile_part[vcs].rsplit("@", 1)[-1]
+                        for vcs in VCS_LIST
+                        if pipfile_part.get(vcs)
+                    ),
+                    "",
+                )
                 return (
                     vcs_type == req.link.scheme
                     and vcs_ref == requested_revision
@@ -835,7 +831,7 @@ class Environment:
         original_path = sys.path
         original_prefix = sys.prefix
         prefix = self.prefix.as_posix()
-        with temp_environ(), temp_path():
+        with (temp_environ(), temp_path()):
             os.environ["PATH"] = os.pathsep.join(
                 [
                     self.script_basedir,
@@ -848,12 +844,11 @@ class Environment:
             if self.is_venv:
                 os.environ["PYTHONPATH"] = self.base_paths["PYTHONPATH"]
                 os.environ["VIRTUAL_ENV"] = prefix
-            else:
-                if not self.project.s.PIPENV_USE_SYSTEM and not os.environ.get(
+            elif not self.project.s.PIPENV_USE_SYSTEM and not os.environ.get(
                     "VIRTUAL_ENV"
                 ):
-                    os.environ["PYTHONPATH"] = self.base_paths["PYTHONPATH"]
-                    os.environ.pop("PYTHONHOME", None)
+                os.environ["PYTHONPATH"] = self.base_paths["PYTHONPATH"]
+                os.environ.pop("PYTHONHOME", None)
             sys.path = self.sys_path
             sys.prefix = self.sys_prefix
             try:

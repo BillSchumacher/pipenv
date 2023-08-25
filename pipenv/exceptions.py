@@ -40,10 +40,7 @@ def handle_exception(exc_type, exception, traceback, hook=sys.excepthook):
         formatted_lines = []
         for line in lines:
             line = line.strip("'").strip('"').strip("\n").strip()
-            if not line.startswith("File"):
-                line = f"      {line}"
-            else:
-                line = f"  {line}"
+            line = f"      {line}" if not line.startswith("File") else f"  {line}"
             line = f"[{exception.__class__.__name__!s}]: {line}"
             formatted_lines.append(line)
         # use new exception prettification rules to format exceptions according to
@@ -99,17 +96,9 @@ class PipenvCmdError(PipenvException):
             file=file,
         )
         if self.out:
-            click.echo(
-                "{} {}".format("OUTPUT: ", self.out),
-                file=file,
-                err=True,
-            )
+            click.echo(f"OUTPUT:  {self.out}", file=file, err=True)
         if self.err:
-            click.echo(
-                "{} {}".format("STDERR: ", self.err),
-                file=file,
-                err=True,
-            )
+            click.echo(f"STDERR:  {self.err}", file=file, err=True)
 
 
 class JSONParseError(PipenvException):
@@ -150,9 +139,7 @@ class PipenvUsageError(UsageError):
     def show(self, file=None):
         if file is None:
             file = sys.stderr
-        color = None
-        if self.ctx is not None:
-            color = self.ctx.color
+        color = self.ctx.color if self.ctx is not None else None
         if self.extra:
             if isinstance(self.extra, str):
                 self.extra = [self.extra]
@@ -445,7 +432,4 @@ def prettify_exc(error):
             else:
                 _, error, info = error.rpartition(split_string)
             errors.append(f"{error} {info}")
-    if not errors:
-        return error
-
-    return "\n".join(errors)
+    return error if not errors else "\n".join(errors)
